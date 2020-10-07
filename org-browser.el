@@ -6,6 +6,8 @@
 (require 'bindat)
 (require 'uuid)
 
+(require 'org-util)
+
 (defvar org-browser-inbox-file (concat org-directory "browser.org") "Org-mode file to put new browser tabs into.")
 (defvar org-browser-sync-files nil "Org-mode files to sync browser tabs into.
 
@@ -13,6 +15,17 @@
 ;;(setq org-browser-sync-files org-agenda-files)
 
 (defvar org-browser-url-property-name "URL" "Name of the property that is used to associate URLs to headlines.")
+(defvar org-browser-open-tab-name "opentab" "Marker to identify headlines that have an open tab in the browser.
+
+May be used as a tag or property, so be careful to use appropriate characters only.")
+;; (setq org-browser-open-tab-name "opentab")
+(defvar org-browser-open-tab-type 'tag "Where to put the marker that identifies headlines that have an open tab in the browser.
+
+If the symbol 'tag mark the headline with a tag. The Tag name will be `org-browser-open-tab-name`.
+If a string mark the headline with a property of that name. The property value will be `org-browser-open-tab-name`.
+")
+;; (setq org-browser-open-tab-type 'tag)
+;; (setq org-browser-open-tab-type "BROWSER")
 
 (defvar org-browser-connection-host 'local "Where to connect to to talk to the browser server program")
 (defvar org-browser-connection-port "43893" "Where to connect to to talk to the browser server program")
@@ -139,33 +152,6 @@
 								   (error "Something went wrong when opening tab %s." tab-url)
 								   ))))
 
-(defun org-browser--body-element-is-link (el)
-  (and (listp el) (eq (car el) 'link)))
-
-(defun org-browser--body-link-get-raw-link (link-el)
-  (let* ((link-data (cadr link-el))
-		 (raw-link (plist-get link-data :raw-link)))
-	raw-link))
-
-(defun org-browser--body-link-get-all (els)
-  (mapcar #'org-browser--body-link-get-raw-link
-		  (-filter #'org-browser--body-element-is-link els)))
-
-(defun org-browser-headline-get-links (headline)
-  "Find all links in HEADLINE and return as list."
-  (let* ((section (org-ml-headline-get-contents t t headline))
-		(title (org-ml-get-property :title headline))
-		(link-lists (--map (org-ml-match '(link) it) (cons (org-ml-get-children title) section)))
-		(links (apply #'append link-lists)))
-	links))
-
-(defun org-browser-headline-get-urls (headline)
-  "Find all http(s) links in HEADLINE and return as list."
-  (let ((valid-link-types '("http" "https")))
-	(--map (org-ml-get-property :raw-link it)
-		   (--filter (member (org-ml-get-property :type it) valid-link-types)
-					 (org-browser-headline-get-links headline)))))
-
 ;;(defun org-browser-headline-select-url (headline))
 
 (defun org-browser-filter-headline-with-uuid (uuid headlines)
@@ -182,24 +168,6 @@
 		  (car matching-headlines))))))
 
 
-(defun org-browser-headline-get-title (headline)
-  (substring-no-properties (car (org-ml-get-property :title headline))))
-
-
-(defun org-browser-list-choice-prompt (candidates prompt)
-  "Select one choice from CANDIDATES.
-
-If CANDIDATES is empty, return nil.
-If CANDIDATES has one element, return that element.
-Otherwise PROMPT the user for a choice."
-  (when candidates
-	  (cond
-	 ((not (cdr candidates))
-	  (car candidates))
-	 (t
-	  (completing-read prompt candidates nil t (car candidates))))))
-
-
 (defun org-browser-tab-title (tab)
   (cdr (assq 'title tab)))
 
@@ -211,8 +179,8 @@ Otherwise PROMPT the user for a choice."
 		   (headline (org-ml-parse-this-headline))
 		   ;; TODO: extract org-browser-headline-select-url, but what's elegant to still have update-headline-url?
 		   (url (or (org-ml-headline-get-node-property org-browser-url-property-name headline)
-					(let* ((urls (org-browser-headline-get-urls headline))
-						   (url (org-browser-list-choice-prompt
+					(let* ((urls (org-util-headline-get-urls headline))
+						   (url (org-util-list-choice-prompt
 								 urls
 								 (format "No existing %s property, but body URLs found. Choose which URL this headline represents: "
 										 org-browser-url-property-name))))
@@ -223,7 +191,7 @@ Otherwise PROMPT the user for a choice."
 					  url))))
 	  (cl-flet ((handle-url-found (tab)
 								  (let* ((headline (org-browser-filter-headline-with-uuid headline-id (org-ml-parse-this-buffer)))
-										 (headline-title (save-excursion (org-browser-headline-get-title headline)))
+										 (headline-title (save-excursion (org-util-headline-get-title headline)))
 										 (title (org-browser-tab-title tab))
 										 (title (when (not (string-equal title headline-title))
 												  (let ((read-answer-short t)
@@ -240,7 +208,13 @@ Otherwise PROMPT the user for a choice."
 									(save-excursion
 									  (when title
 										(org-ml-update* (org-ml-headline-set-title! title nil it) headline))
-									  (org-ml-update* (org-ml-insert-into-property :tags 0 "browsertab" it) headline)))))
+									  (org-ml-update*
+										(if (eq org-browser-open-tab-type 'tag)
+											(org-ml-insert-into-property :tags 0 org-browser-open-tab-name it)
+										  (org-ml-headline-set-node-property
+										   org-browser-open-tab-type
+										   org-browser-open-tab-name it))
+										headline)))))
 		(if url
 			(org-browser-url-is-opened
 			 (url-normalize-url url)
