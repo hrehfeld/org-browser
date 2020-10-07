@@ -177,7 +177,6 @@ If a string mark the headline with a property of that name. The property value w
   (save-excursion
 	(let* ((headline-id (org-id-get-create))
 		   (headline (org-ml-parse-this-headline))
-		   ;; TODO: extract org-browser-headline-select-url, but what's elegant to still have update-headline-url?
 		   (url (or (org-ml-headline-get-node-property org-browser-url-property-name headline)
 					(let* ((urls (org-util-headline-get-urls headline))
 						   (url (org-util-list-choice-prompt
