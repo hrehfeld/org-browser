@@ -432,63 +432,63 @@ Should be either 'tab or 'bookmark"
 			 (seq-doseq (tab item-list)
 				 (puthash (url-normalize-url (org-browser-tab-url tab)) tab tabs-map)
 				 )
-			 (let ((sync-files (append org-browser-sync-files
-																 (list org-browser-inbox-file))))
-				 (save-window-excursion
-					 (save-excursion
+			 (save-window-excursion
+				 (save-excursion
+					 (let ((sync-files (append org-browser-sync-files
+																		 (list org-browser-inbox-file))))
 						 (dolist (file-name sync-files)
 							 ;;(message "Inspecting %s" file-name)
 							 (let ((curbuf (find-file file-name)))
 								 (with-current-buffer curbuf
 									 (save-excursion
 										 (let* ((headlines (->> (org-ml-parse-this-buffer)
-																					 (org-ml-match '(headline))))
+																						(org-ml-match '(headline))))
 														;; retain headlines that have an open browser tab
-													 (matching-headlines
-														(->> headlines
-																 (--filter (gethash (url-normalize-url (org-browser-headline-url it))
-																										tabs-map))))
-													 ;; headlines that were closed since the last update
-													 ;; have an url set, still have a tab/bookmark marker and are not the list of tabs
-													 (closed-headlines (--filter
-																							(let ((url-prop (org-browser-headline-url it))
-																										(already-closed (not (org-browser-headline-status it))))
-																								(and url-prop
-																										 (not already-closed)
-																										 (not (gethash (url-normalize-url url-prop)
-																																	 tabs-map))))
-																							headlines)))
+														(matching-headlines
+														 (->> headlines
+																	(--filter (gethash (url-normalize-url (org-browser-headline-url it))
+																										 tabs-map))))
+														;; headlines that were closed since the last update
+														;; have an url set, still have a tab/bookmark marker and are not the list of tabs
+														(closed-headlines (--filter
+																							 (let ((url-prop (org-browser-headline-url it))
+																										 (already-closed (not (org-browser-headline-status it))))
+																								 (and url-prop
+																											(not already-closed)
+																											(not (gethash (url-normalize-url url-prop)
+																																		tabs-map))))
+																							 headlines)))
 											 (dolist (headline matching-headlines)
-												 (let* ((url (url-normalize-url (org-browser-headline-url headline)))
-																(tab (gethash url tabs-map)))
-													 ;;(message "Found headline for %s in %s" url file-name)
+												 (let* ((headline-url (url-normalize-url (org-browser-headline-url headline)))
+																(tab (gethash headline-url tabs-map))
+																(title (org-browser-tab-title-escaped tab))
+																(url (org-browser-tab-url tab))
+																(status (org-browser-tab-status tab))
+																(updated-title (org-browser-headline-check-title-interactively title curbuf headline)))
+													 ;;(message "Found headline for %s in %s" headline-url file-name)
 													 (puthash url t found-tabs)
-													 (let* ((title (org-browser-tab-title-escaped tab))
-																	(url (org-browser-tab-url tab))
-																	(status (org-browser-tab-status tab))
-																	(updated-title (org-browser-headline-check-title-interactively title curbuf headline)))
-														 (org-browser-headline-update updated-title status url headline))))
+													 (org-browser-headline-update updated-title status url headline)))
 											 ;; update all of the unclosed headlines that were now closed in the browser
 											 (dolist (headline closed-headlines)
 												 (let* ((status 'closed))
 													 (->> headline
 																(org-browser-headline-set-status status)
 																(org-browser-update)))))
-										 )))))))
-			 (let ((inbox-buf (find-file org-browser-inbox-file)))
-				 (with-current-buffer inbox-buf
-					 (save-excursion
-						 (maphash (lambda (url tab)
-												(unless (gethash url found-tabs)
-													(let ((title (org-browser-tab-title-escaped tab))
-																(url (org-browser-tab-url tab))
-																(status (org-browser-tab-status tab)))
-														(->> (org-ml-build-headline)
-																 (org-browser-headline-set title status url)
-																 (org-ml-insert-tail (point-max))))
-													(org-id-get-create)))
-											tabs-map)))))
-			 )))
+										 )))))
+					 (let ((inbox-buf (find-file org-browser-inbox-file)))
+						 (with-current-buffer inbox-buf
+							 (save-excursion
+								 (maphash (lambda (url tab)
+														(unless (gethash url found-tabs)
+															(let ((title (org-browser-tab-title-escaped tab))
+																		(url (org-browser-tab-url tab))
+																		(status (org-browser-tab-status tab)))
+																(->> (org-ml-build-headline)
+																		 (org-browser-headline-set title status url)
+																		 (org-ml-insert-tail (point-max))))
+															(org-id-get-create)))
+													tabs-map)))))))
+		 )))
 (global-set-key (kbd "<f8>") #'org-browser-sync)
 ;;(setq print-length 999)
 
