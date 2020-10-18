@@ -468,7 +468,7 @@ Should be either 'tab or 'bookmark"
 																	(status (org-browser-tab-status tab))
 																	(updated-title (org-browser-headline-check-title-interactively title curbuf headline)))
 														 (org-browser-headline-update updated-title status url headline))))
-											 ;;
+											 ;; update all of the unclosed headlines that were now closed in the browser
 											 (dolist (headline closed-headlines)
 												 (let* ((status 'closed))
 													 (->> headline
