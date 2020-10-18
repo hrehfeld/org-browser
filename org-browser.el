@@ -243,7 +243,7 @@ If a string mark the headline with a property of that name. The property value w
 						headline-id
 						(lambda (headline)
 							(message "updating headline %s" (org-browser-tab-title tab))
-							(let* ((title (org-browser-tab-title tab))
+							(let* ((title (org-browser-tab-title-escaped tab))
 										 (updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
 								(when (not (string-equal title updated-title))
 									(->>
@@ -372,6 +372,9 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-tab-title (tab)
   (gethash "title" tab))
 
+(defun org-browser-tab-title-escaped (tab)
+  (org-browser-headline-title-escape (org-browser-tab-title tab)))
+
 (defun org-browser-tab-status (tab)
 	"Return the status of the TAB as a symbol.
 
@@ -440,28 +443,34 @@ Should be either 'tab or 'bookmark"
 									 (save-excursion
 										 (let* ((headlines (->> (org-ml-parse-this-buffer)
 																					 (org-ml-match '(headline))))
+														;; retain headlines that have an open browser tab
 													 (matching-headlines
 														(->> headlines
-																 ;; retain headlines that have an open browser tab
 																 (--filter (gethash (url-normalize-url (org-browser-headline-url it))
 																										tabs-map))))
-													 (closed-headlines (--filter (not (gethash (url-normalize-url (org-browser-headline-url it))
-																																		 tabs-map))
-																											 headlines)))
+													 ;; headlines that were closed since the last update
+													 ;; have an url set, still have a tab/bookmark marker and are not the list of tabs
+													 (closed-headlines (--filter
+																							(let ((url-prop (org-browser-headline-url it))
+																										(already-closed (not (org-browser-headline-status it))))
+																								(and url-prop
+																										 (not already-closed)
+																										 (not (gethash (url-normalize-url url-prop)
+																																	 tabs-map))))
+																							headlines)))
 											 (dolist (headline matching-headlines)
 												 (let* ((url (url-normalize-url (org-browser-headline-url headline)))
 																(tab (gethash url tabs-map)))
 													 ;;(message "Found headline for %s in %s" url file-name)
 													 (puthash url t found-tabs)
-													 (let* ((title (org-browser-headline-title-escape (org-browser-tab-title tab)))
+													 (let* ((title (org-browser-tab-title-escaped tab))
 																	(url (org-browser-tab-url tab))
 																	(status (org-browser-tab-status tab))
 																	(updated-title (org-browser-headline-check-title-interactively title curbuf headline)))
 														 (org-browser-headline-update updated-title status url headline))))
 											 ;;
 											 (dolist (headline closed-headlines)
-												 (let* ((url (url-normalize-url (org-browser-headline-url headline)))
-																(status 'closed))
+												 (let* ((status 'closed))
 													 (->> headline
 																(org-browser-headline-set-status status)
 																(org-browser-update)))))
@@ -471,7 +480,7 @@ Should be either 'tab or 'bookmark"
 					 (save-excursion
 						 (maphash (lambda (url tab)
 												(unless (gethash url found-tabs)
-													(let ((title (org-browser-headline-title-escape (org-browser-tab-title tab)))
+													(let ((title (org-browser-tab-title-escaped tab))
 																(url (org-browser-tab-url tab))
 																(status (org-browser-tab-status tab)))
 														(->> (org-ml-build-headline)
