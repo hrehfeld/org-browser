@@ -15,7 +15,7 @@ Otherwise PROMPT the user for a choice."
 	  (completing-read prompt candidates nil t (car candidates))))))
 
 (defun org-util-headline-get-title (headline)
-  (substring-no-properties (or (car (org-ml-get-property :title headline)) "")))
+  (org-ml-get-property :raw-value headline))
 
 (defun org-util-headline-get-links (headline)
   "Find all links in HEADLINE and return as list."

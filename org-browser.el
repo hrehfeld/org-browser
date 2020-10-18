@@ -15,6 +15,10 @@
 ;;(setq org-browser-sync-files (list org-browser-inbox-file))
 
 (defvar org-browser-url-property-name "URL" "Name of the property that is used to associate URLs to headlines.")
+(defvar org-browser-bookmark-name "bookmark" "Marker to identify headlines that have a bookmark in the browser.
+
+May be used as a tag or property, so be careful to use appropriate characters only.")
+
 (defvar org-browser-open-tab-name "opentab" "Marker to identify headlines that have an open tab in the browser.
 
 May be used as a tag or property, so be careful to use appropriate characters only.")
@@ -35,9 +39,6 @@ If a string mark the headline with a property of that name. The property value w
 
 (defun org-browser--connection-build-url (what)
   (format "http://%s:%s/%s" org-browser-connection-host org-browser-connection-port what))
-
-
-(defvar org-browser-connection-buffer (generate-new-buffer "org-browser-connection-input") "Buffer messages until msg has arrived completely")
 
 
 ;; TODO: rename internal
@@ -66,18 +67,18 @@ If a string mark the headline with a property of that name. The property value w
 			   (serialized (decode-coding-region (point-min) message-end 'utf-8 temp-buffer)))
 		  (delete-region (point-min) message-end)
 		  (setq org-browser-current-message-size 0)
-		  (with-current-buffer temp-buffer
-			(let* ((msg (json-parse-buffer))
-				   (message-id (org-browser--message-id msg))
-				   (payload (org-browser--message-payload msg))
-				   (handler (cdr (assoc message-id org-browser--response-handlers))))
-			  ;;(message "%S: %S" message-id msg)
-			  (assert handler)
-			  (setq org-browser--response-handlers (assoc-delete-all message-id org-browser--response-handlers))
-			  (message "Received response: %s" message-id)
-			  (funcall handler payload)
-			  ))
-		  (kill-buffer temp-buffer))))))
+		  (let* ((msg (with-current-buffer temp-buffer (json-parse-buffer))))
+				(kill-buffer temp-buffer)
+				(let* ((message-id (org-browser--message-id msg))
+							 (payload (org-browser--message-payload msg))
+							 (handler (cdr (assoc message-id org-browser--response-handlers))))
+					;;(message "Received response: %s %S" message-id payload)
+					;;(message "%S: %S" message-id msg)
+					;;(message "%S" org-browser--response-handlers)
+					(assert handler)
+					(setq org-browser--response-handlers (assoc-delete-all message-id org-browser--response-handlers))
+					(funcall handler payload))
+			  ))))))
 
 
 (defun org-browser-connection-sentinel (proc msg)
@@ -123,7 +124,7 @@ If a string mark the headline with a property of that name. The property value w
 	;;(delete-process org-browser--connection)
 	(setq org-browser--connection nil)
 	))
-;; (org-browser-connection-delete)
+(global-set-key (kbd "<f7>") (lambda () (interactive) (org-browser-connection-delete)))
 
 (defun org-browser-connection-send-raw (msg)
   "Send a json encoded MSG after making sure connection is up."
@@ -137,10 +138,10 @@ If a string mark the headline with a property of that name. The property value w
 
 (defun org-browser-connection-send (payload handler)
   (let* ((imessage (uuid-string))
-		 (msg `((payload . ,payload) (imessage . ,imessage))))
+				 (msg `((payload . ,payload) (imessage . ,imessage))))
 	(setq org-browser--response-handlers
-		  (append (list (cons imessage handler))
-				  org-browser--response-handlers))
+				(append (list (cons imessage handler))
+								org-browser--response-handlers))
 	(org-browser-connection-send-raw msg)
 	))
 
@@ -155,120 +156,210 @@ If a string mark the headline with a property of that name. The property value w
 
 
 (defun org-browser-url-is-opened (tab-url handler)
-  (message "Syncing %s." tab-url)
-  (org-browser-connection-send `((type . status)
-								 (url . ,tab-url))
-							   (lambda (item-list)
-								 (if (not (seq-empty-p item-list))
-									 (let* ((item (elt item-list 0))
-											(type (assq 'type item)))
-									   (message "Received response: %S" item)
-									   (funcall handler item)
-									   )
-								   (funcall handler nil)
-								   ))))
+  (org-browser-connection-send
+	 `((type . status)
+		 (url . ,tab-url))
+	 handler))
 ;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-url-is-opened "https://github.com/tkf/emacs-request")))
 ;;(json-serialize '((:url . "https://github.com/tkf/emacs-request")))
 
 (defun org-browser-url-open (tab-url handler)
-  (org-browser-connection-send `((type . open)
-								 (url . ,tab-url))
-							   (lambda (item-list)
-								 (if (not (seq-empty-p item-list))
-									 (let* ((item (elt item-list 0))
-											(type (assq 'type item)))
-									   (message "Received response: %S" item)
-									   (funcall handler item)
-									   )
-								   (error "Something went wrong when opening tab %s." tab-url)
-								   ))))
+  (org-browser-connection-send
+	 `((type . open)
+		 (url . ,tab-url))
+	 (lambda (item-list)
+		 (if (not (seq-empty-p item-list))
+				 (let* ((item (elt item-list 0))
+								(type (assq 'type item)))
+					 (message "Received response: %S" item)
+					 (funcall handler item)
+					 )
+			 (error "Something went wrong when opening tab %s." tab-url)
+			 ))))
 
 ;;(defun org-browser-headline-select-url (headline))
 
-(defun org-browser-filter-headline-with-uuid (uuid headlines)
+(defun org-browser-filter-headline-with-uuid (uuid headlinesa)
   (cl-flet ((has-this-id (headline)
-						 (equal uuid
-								(org-ml-headline-get-node-property "ID" headline))))
+												 (equal uuid
+																(org-ml-headline-get-node-property "ID" headline))))
+		(save-excursion
+			(let* ((headlines (org-ml-match '(headline) headlinesa))
+						 (matching-headlines (-filter #'has-this-id headlines)))
+				(assert matching-headlines t "No headline with this uuid!" uuid headlines headlinesa)
+				(if (cdr matching-headlines)
+						(error (format "Multiple matching headlines found for UUID %S" uuid))
+					(car matching-headlines))))))
+
+
+(defun org-browser-update (headline)
+	(message "updating %s" (org-util-headline-get-title headline))
 	(save-excursion
-	  (let ((matching-headlines
-			 (->> headlines
-				  (org-ml-match '(headline))
-				  (-filter #'has-this-id))))
-		(if (cdr matching-headlines)
-			(error (format "Multiple matching headlines found for UUID %S" uuid))
-		  (car matching-headlines))))))
+		(let ((begin (org-ml-get-property :begin headline))
+					(end (org-ml-get-property :end headline)))
+			(assert begin)
+			(assert end)
+			(delete-region begin end)
+			(goto-char begin)
+			(insert (org-element-interpret-data headline)))))
+
+(defun org-browser-with-headline-by-id (headline-buffer headline-id f)
+	(with-current-buffer headline-buffer
+		(let ((headline
+					 (->> (org-ml-parse-this-buffer)
+								(org-browser-filter-headline-with-uuid headline-id)
+								(funcall f))))
+			(when headline
+				(org-browser-update headline)))))
 
 
-(defun org-browser-tab-title (tab)
-  (cdr (assq 'title tab)))
+(defun org-browser-sync-headline (headline-buffer headline)
+  "Sync browser tab/bookmark status for the headline at point"
+  (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
+				(url (or (org-ml-headline-get-node-property org-browser-url-property-name headline)
+								 (let* ((urls (org-util-headline-get-urls headline))
+												(url (org-util-list-choice-prompt
+															urls
+															(format "No existing %s property, but body URLs found. Choose which URL this headline represents: "
+																			org-browser-url-property-name))))
+									 (when url
+										 ;; set URL property to selected URL
+										 (org-ml-update* (org-ml-headline-set-node-property org-browser-url-property-name url it) headline))
+									 url))))
+		(unless url
+			(error "No URL on this headline"))
+		(let ((url (url-normalize-url url)))
+			(message "Syncing %s." url)
+			(org-browser-url-is-opened
+			 url
+			 ;; async
+			 (lambda (tabs)
+				 (unless (= 1 (length tabs))
+					 (error "No tab for URL %s found: %s" url tabs))
+				 (let ((tab (elt tabs 0)))
+					 (message "Tab found: %s %S" url tab)
+					 (org-browser-with-headline-by-id
+						headline-buffer
+						headline-id
+						(lambda (headline)
+							(message "updating headline %s" (org-browser-tab-title tab))
+							(let* ((title (org-browser-tab-title tab))
+										 (updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
+								(when (not (string-equal title updated-title))
+									(->>
+									 (org-browser-headline-set-title updated-title)
+									 (org-browser-headline-set-url (org-browser-tab-url tab)))))
+							;; (org-ml-update (lambda (hl)
+							;; 								 (message "headline: %S" (org-ml-get-property :begin hl))
+							;; 								 hl)
+							;; 							 )
+							))
+					 ))))))
 
-(defun org-browser-sync-headline ()
+(defun org-browser-this-headline ()
+  "Get the headline at point, creating ID"
+  (interactive)
+  (let* ((headline-id (org-id-get-create))
+				 (headline (org-ml-parse-this-headline)))
+		headline))
+
+(defun org-browser-sync-this-headline ()
   "Sync browser tab/bookmark status for the headline at point"
   (interactive)
-  (save-excursion
-	(let* ((headline-id (org-id-get-create))
-		   (headline (org-ml-parse-this-headline))
-		   (url (or (org-ml-headline-get-node-property org-browser-url-property-name headline)
-					(let* ((urls (org-util-headline-get-urls headline))
-						   (url (org-util-list-choice-prompt
-								 urls
-								 (format "No existing %s property, but body URLs found. Choose which URL this headline represents: "
-										 org-browser-url-property-name))))
-					  (when url
-						;; set URL property to selected URL
-						(save-excursion
-						  (org-ml-update* (org-ml-headline-set-node-property org-browser-url-property-name url it) headline)))
-					  url))))
-	  (cl-flet ((handle-url-found (tab)
-								  (let* ((headline (org-browser-filter-headline-with-uuid headline-id (org-ml-parse-this-buffer))))
-									(org-browser-update-headline tab headline))))
-		(if url
-			(org-browser-url-is-opened
-			 (url-normalize-url url)
-			 (lambda (tab)
-			   (if tab
-				   (handle-url-found tab)
-				 (progn
-				   (message "No tab for URL %s found." url)
-				   ;;(org-browser-url-open url #'handle-url-found)
-				   )
-				 )))
-		  (error "No URL on this headline"))))))
-;;(global-set-key (kbd "<f9>") #'org-browser-sync-headline)
+  (org-browser-sync-headline (current-buffer) (org-browser-this-headline)))
+(global-set-key (kbd "<f9>") #'org-browser-sync-this-headline)
 
 (defun org-browser-headline-title-escape (title)
-  (replace-regexp-in-string "[:*]+" "" title))
+	(->> title
+			 ;; remove * because of headline level syntax
+			 (replace-regexp-in-string "^[*]+[:blank:]" "")
+			 ;; remove : because of tag syntax
+			 (replace-regexp-in-string "[:blank:]*\\(:[^:[:blank:]]+\\)+:[:blank:]*$" "")
+			 ;; remove leading numbers 1. because of numbered lists
+			 (replace-regexp-in-string "^[0-9]+\\.[ 	]+" "")
+			 ))
 
-(defun org-browser-headline-update (tab headline)
-  (let* ((headline-title (org-util-headline-get-title headline))
-		 (title (org-browser-tab-title tab))
-		 (url (org-browser-tab-url tab)))
-	(when (and (not (string-empty-p headline-title))
-			   (not (string-equal title headline-title)))
-	  (setq title
-			(let ((read-answer-short t)
-				  (action (read-answer (format "Overwrite Headline Title? \"%s\" -> \"%s\": " headline-title title)
-									   '(("yes"  ?y "overwrite with tab title")
-										 ("no"   ?n "keep org title")
-										 ("edit"  ?e "edit tab title and overwrite")))))
-			  (xcond
-			   ((string-equal action "edit")
-				(read-string "Edit new title: " title))
-			   ((string-equal action "no")
-				nil)
-			   (t title)))))
-	(setq headline
-		  (org-ml-headline-set-node-property org-browser-url-property-name url headline))
-	(when title
-	  (setq headline (org-ml-headline-set-title! title nil headline)))
-	(if (eq org-browser-open-tab-type 'tag)
-		(org-ml-insert-into-property :tags 0 org-browser-open-tab-name headline)
-	  (org-ml-headline-set-node-property
-	   org-browser-open-tab-type
-	   org-browser-open-tab-name headline))))
+;;(org-browser-headline-title-escape "** 3. Python: foo :foo:bar:")
 
-(defun org-browser-update-headline (tab headline)
-  (org-ml-update #'identity (org-browser-headline-update tab headline)))
+(defun org-browser-headline-set (title status url headline)
+	(->> headline
+			 (org-browser-headline-set-title title)
+			 (org-browser-headline-set-status status)
+			 (org-browser-headline-set-url url)
+			 ))
+
+(defun org-browser-headline-needs-update (title status url headline)
+	;; go through all properties and see if they need updating
+	(or
+	 (not (string-equal title (org-util-headline-get-title headline)))
+	 (not (eq status (org-browser-headline-status headline)))
+	 (not (string-equal url (org-browser-headline-url headline)))
+	 ))
+
+(defun org-browser-headline-update (title status url headline)
+	(when (org-browser-headline-needs-update title status url headline)
+		(org-browser-headline-set title status url headline)
+		(org-browser-update headline)))
+
+
+
+(defun org-browser-headline-set-status (status headline)
+	(let ((status-token (xcond
+											 ((eq status 'tab) org-browser-open-tab-name)
+											 ((eq status 'closed) nil))))
+		(cl-flet ((tags-setter (status-token)
+													 (org-ml-insert-into-property :tags 0 status-token headline))
+							(tags-deleter ()
+														(->> headline
+																 (org-ml-remove-from-property :tags org-browser-open-tab-name)
+																 (org-ml-remove-from-property :tags org-browser-bookmark-name)))
+							(property-setter (status-token)
+															 (org-ml-headline-set-node-property org-browser-open-tab-type status-token headline))
+							(property-deleter ()
+																(org-ml-headline-set-node-property org-browser-open-tab-type "" headline)))
+			(let ((setter (if (eq org-browser-open-tab-type 'tag)
+												#'tags-setter
+											#'property-setter))
+						(deleter (if (eq org-browser-open-tab-type 'tag)
+												 #'tags-deleter
+											 #'property-deleter)))
+				(if status-token
+						(funcall setter status-token)
+					(funcall deleter))))))
+
+(defun org-browser-headline-set-title (title headline)
+	(org-ml-headline-set-title! (org-browser-headline-title-escape title) nil headline))
+
+(defun org-browser-headline-set-url (url headline)
+	(org-ml-headline-set-node-property org-browser-url-property-name url headline))
+
+(defun org-browser-headline-check-title-interactively (new-title buffer headline)
+	"Update "
+  (let* ((old-title (org-util-headline-get-title headline)))
+		(when (and (not (string-empty-p old-title))
+							 (not (string-equal new-title old-title)))
+			(with-current-buffer buffer
+				(save-excursion
+					(let ((headline-pos (org-ml-get-property :begin headline)))
+						(assert headline-pos)
+						;; position to have a look at the headline for the prompt
+						(goto-char headline-pos))
+					(setq new-title
+								(let ((read-answer-short t)
+											(action (read-answer (format "Overwrite Headline Title? \"%s\" -> \"%s\": " old-title new-title)
+																					 '(("yes"  ?y "overwrite with tab title")
+																						 ("no"   ?n "keep org title")
+																						 ("edit"  ?e "edit tab title and overwrite")))))
+									(xcond
+									 ((string-equal action "edit")
+										(read-string "Edit new title: " new-title))
+									 ((string-equal action "no")
+										nil)
+									 (t new-title))))))
+			)
+		new-title))
+
+
 
 (defun org-browser-get-items  (callback)
   (org-browser-connection-send
@@ -281,53 +372,120 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-tab-title (tab)
   (gethash "title" tab))
 
+(defun org-browser-tab-status (tab)
+	"Return the status of the TAB as a symbol.
+
+Should be either 'tab or 'bookmark"
+	;;fixme type or status?
+  (intern (gethash "type" tab)))
+
 (defun org-browser-headline-url (headline)
   (org-ml-headline-get-node-property org-browser-url-property-name headline))
+
+(defun org-browser-headline-set-status (status headline)
+	(let ((status-token (xcond
+											 ((eq status 'tab) org-browser-open-tab-name)
+											 ((eq status 'closed) nil))))
+		(cl-flet ((tags-setter (status-token)
+													 (org-ml-insert-into-property :tags 0 status-token headline))
+							(tags-deleter ()
+														(->> headline
+																 (org-ml-remove-from-property :tags org-browser-open-tab-name)
+																 (org-ml-remove-from-property :tags org-browser-bookmark-name)))
+							(property-setter (status-token)
+															 (org-ml-headline-set-node-property org-browser-open-tab-type status-token headline))
+							(property-deleter ()
+																(org-ml-headline-set-node-property org-browser-open-tab-type "" headline)))
+			(let ((setter (if (eq org-browser-open-tab-type 'tag)
+												#'tags-setter
+											#'property-setter))
+						(deleter (if (eq org-browser-open-tab-type 'tag)
+												 #'tags-deleter
+											 #'property-deleter)))
+				(if status-token
+						(funcall setter status-token)
+					(funcall deleter))))))
+
+(defun org-browser-headline-status (headline)
+	(if (eq org-browser-open-tab-type 'tag)
+			(let ((tags (org-ml-get-property :tags headline)))
+				(cond
+				 ((member org-browser-open-tab-name tags) 'tab)
+				 ((member org-browser-bookmark-name tags) 'bookmark)))
+		(org-ml-headline-get-node-property org-browser-open-tab-type headline)))
+
+(defun org-browser-node-without-parent (node)
+	(org-plist-delete (cdr node) :parent))
 
 (defun org-browser-sync ()
   (interactive)
   (org-browser-get-items
    (lambda (item-list)
-	 (message "%s tabs received" (length item-list))
-	 ;;(message "%S" item-list)
-	 (let ((tabs-map (make-hash-table :test 'equal))
-		   (found-tabs (make-hash-table :test 'equal)))
-	   (seq-doseq (tab item-list)
-		 (puthash (url-normalize-url (org-browser-tab-url tab)) tab tabs-map)
-		 )
-
-	   (let ((sync-files (append org-browser-sync-files
-								 (list org-browser-inbox-file))))
-		 (save-window-excursion
-		   (save-excursion
-			 (dolist (file-name sync-files)
-			   ;;(message "Inspecting %s" file-name)
-			   (with-current-buffer (find-file file-name)
-				 (save-excursion
-				   (let ((matching-headlines
-						  (->> (org-ml-parse-this-buffer)
-							   (org-ml-match '(headline))
-							   (--filter (gethash (url-normalize-url (org-browser-headline-url it)) tabs-map)))))
-					 (dolist (headline matching-headlines)
-					   (let* ((url (org-browser-headline-url headline))
-										(message "Found headline for %s in %s" url file-name)
-							 (tab (gethash url tabs-map)))
-						 (puthash url nil found-tabs)
-						 (org-browser-update-headline tab headline)))
-					 )))
-			   ))))
-	   (with-current-buffer (find-file org-browser-inbox-file)
-		 (save-excursion
-		   (maphash (lambda (url tab)
-					  (unless (gethash url found-tabs)
-						(org-ml-insert-tail (point-max)
-																(org-browser-headline-update tab (org-ml-build-headline)))
-						))
-					tabs-map)))
-	   )
-	 )))
-;;(global-set-key (kbd "<f8>") #'org-browser-sync)
+		 (message "%s tabs received" (length item-list))
+		 ;;(message "%S" item-list)
+		 (let ((tabs-map (make-hash-table :test 'equal))
+					 (found-tabs (make-hash-table :test 'equal)))
+			 ;; add items to the tabs-map by url
+			 (seq-doseq (tab item-list)
+				 (puthash (url-normalize-url (org-browser-tab-url tab)) tab tabs-map)
+				 )
+			 (let ((sync-files (append org-browser-sync-files
+																 (list org-browser-inbox-file))))
+				 (save-window-excursion
+					 (save-excursion
+						 (dolist (file-name sync-files)
+							 ;;(message "Inspecting %s" file-name)
+							 (let ((curbuf (find-file file-name)))
+								 (with-current-buffer curbuf
+									 (save-excursion
+										 (let* ((headlines (->> (org-ml-parse-this-buffer)
+																					 (org-ml-match '(headline))))
+													 (matching-headlines
+														(->> headlines
+																 ;; retain headlines that have an open browser tab
+																 (--filter (gethash (url-normalize-url (org-browser-headline-url it))
+																										tabs-map))))
+													 (closed-headlines (--filter (not (gethash (url-normalize-url (org-browser-headline-url it))
+																																		 tabs-map))
+																											 headlines)))
+											 (dolist (headline matching-headlines)
+												 (let* ((url (url-normalize-url (org-browser-headline-url headline)))
+																(tab (gethash url tabs-map)))
+													 ;;(message "Found headline for %s in %s" url file-name)
+													 (puthash url t found-tabs)
+													 (let* ((title (org-browser-headline-title-escape (org-browser-tab-title tab)))
+																	(url (org-browser-tab-url tab))
+																	(status (org-browser-tab-status tab))
+																	(updated-title (org-browser-headline-check-title-interactively title curbuf headline)))
+														 (org-browser-headline-update updated-title status url headline))))
+											 ;;
+											 (dolist (headline closed-headlines)
+												 (let* ((url (url-normalize-url (org-browser-headline-url headline)))
+																(status 'closed))
+													 (->> headline
+																(org-browser-headline-set-status status)
+																(org-browser-update)))))
+										 )))))))
+			 (let ((inbox-buf (find-file org-browser-inbox-file)))
+				 (with-current-buffer inbox-buf
+					 (save-excursion
+						 (maphash (lambda (url tab)
+												(unless (gethash url found-tabs)
+													(let ((title (org-browser-headline-title-escape (org-browser-tab-title tab)))
+																(url (org-browser-tab-url tab))
+																(status (org-browser-tab-status tab)))
+														(->> (org-ml-build-headline)
+																 (org-browser-headline-set title status url)
+																 (org-ml-insert-tail (point-max))))
+													(org-id-get-create)))
+											tabs-map)))))
+			 )))
+(global-set-key (kbd "<f8>") #'org-browser-sync)
 ;;(setq print-length 999)
+
+(defun org-browser-tag-hook-fun ()
+	())
+(add-hook 'org-after-tags-change-hook #'org-browser-tag-hook-fun)
 
 
 (provide 'org-browser)
