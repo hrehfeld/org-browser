@@ -163,10 +163,11 @@ If a string mark the headline with a property of that name. The property value w
 ;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-url-is-opened "https://github.com/tkf/emacs-request")))
 ;;(json-serialize '((:url . "https://github.com/tkf/emacs-request")))
 
-(defun org-browser-url-sync-status (tab-url status handler)
+(defun org-browser-url-sync-status (tab-url status title handler)
   (org-browser-connection-send
 	 `((type . set)
 		 (status . ,status)
+		 (title . ,title)
 		 (url . ,tab-url))
 	 handler))
 
@@ -285,6 +286,7 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-headline-sync-status (status headline-buffer headline)
   "Sync browser tab/bookmark status for the headline at point"
   (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
+				(title (org-util-headline-get-title headline))
 				(url (org-browser-headline-url-interactively headline-buffer headline)))
 		(unless url
 			(error "No URL on this headline"))
@@ -292,6 +294,7 @@ If a string mark the headline with a property of that name. The property value w
 			(org-browser-url-sync-status
 			 url
 			 status
+			 title
 			 ;; async
 			 (lambda (tabs)
 				 (unless (= 1 (length tabs))
@@ -358,17 +361,21 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-headline-set-status (status headline)
 	(let ((status-token (xcond
 											 ((eq status 'tab) org-browser-open-tab-name)
+											 ((eq status 'bookmark) org-browser-bookmark-name)
 											 ((eq status 'kill) nil))))
-		(cl-flet ((tags-setter (status-token)
-													 (org-ml-insert-into-property :tags 0 status-token headline))
-							(tags-deleter ()
+		(cl-flet* ((tags-deleter ()
+														 (->> headline
+																	(org-ml-remove-from-property :tags org-browser-open-tab-name)
+																	(org-ml-remove-from-property :tags org-browser-bookmark-name)))
+							 (tags-setter (status-token)
+														(tags-deleter)
 														(->> headline
-																 (org-ml-remove-from-property :tags org-browser-open-tab-name)
-																 (org-ml-remove-from-property :tags org-browser-bookmark-name)))
-							(property-setter (status-token)
-															 (org-ml-headline-set-node-property org-browser-open-tab-type status-token headline))
-							(property-deleter ()
-																(org-ml-headline-set-node-property org-browser-open-tab-type "" headline)))
+																 (org-ml-insert-into-property :tags 0 status-token)))
+							 (property-deleter ()
+																 (org-ml-headline-set-node-property org-browser-open-tab-type "" headline))
+							 (property-setter (status-token)
+																(property-deleter)
+																(org-ml-headline-set-node-property org-browser-open-tab-type status-token headline)))
 			(let ((setter (if (eq org-browser-open-tab-type 'tag)
 												#'tags-setter
 											#'property-setter))
