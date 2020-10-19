@@ -163,6 +163,13 @@ If a string mark the headline with a property of that name. The property value w
 ;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-url-is-opened "https://github.com/tkf/emacs-request")))
 ;;(json-serialize '((:url . "https://github.com/tkf/emacs-request")))
 
+(defun org-browser-url-sync-status (tab-url status handler)
+  (org-browser-connection-send
+	 `((type . set)
+		 (status . ,status)
+		 (url . ,tab-url))
+	 handler))
+
 (defun org-browser-url-open (tab-url handler)
   (org-browser-connection-send
 	 `((type . open)
@@ -205,27 +212,31 @@ If a string mark the headline with a property of that name. The property value w
 
 (defun org-browser-with-headline-by-id (headline-buffer headline-id f)
 	(with-current-buffer headline-buffer
-		(let ((headline
-					 (->> (org-ml-parse-this-buffer)
-								(org-browser-filter-headline-with-uuid headline-id)
-								(funcall f))))
-			(when headline
-				(org-browser-update headline)))))
+		(save-excursion
+			(let ((headline
+						 (->> (org-ml-parse-this-buffer)
+									(org-browser-filter-headline-with-uuid headline-id)
+									(funcall f))))
+				(when headline
+					(org-browser-update headline))))))
 
+
+(defun org-browser-headline-url-interactively (headline-buffer headline)
+	(or (org-ml-headline-get-node-property org-browser-url-property-name headline)
+			(let* ((urls (org-util-headline-get-urls headline))
+						 (url (org-util-list-choice-prompt
+									 urls
+									 (format "No existing %s property, but body URLs found. Choose which URL this headline represents: "
+													 org-browser-url-property-name))))
+				(when url
+					;; set URL property to selected URL
+					(org-ml-update* (org-ml-headline-set-node-property org-browser-url-property-name url it) headline))
+				url)))
 
 (defun org-browser-sync-headline (headline-buffer headline)
   "Sync browser tab/bookmark status for the headline at point"
   (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
-				(url (or (org-ml-headline-get-node-property org-browser-url-property-name headline)
-								 (let* ((urls (org-util-headline-get-urls headline))
-												(url (org-util-list-choice-prompt
-															urls
-															(format "No existing %s property, but body URLs found. Choose which URL this headline represents: "
-																			org-browser-url-property-name))))
-									 (when url
-										 ;; set URL property to selected URL
-										 (org-ml-update* (org-ml-headline-set-node-property org-browser-url-property-name url it) headline))
-									 url))))
+				(url (org-browser-headline-url-interactively)))
 		(unless url
 			(error "No URL on this headline"))
 		(let ((url (url-normalize-url url)))
@@ -269,6 +280,47 @@ If a string mark the headline with a property of that name. The property value w
   (org-browser-sync-headline (current-buffer) (org-browser-this-headline)))
 (global-set-key (kbd "<f9>") #'org-browser-sync-this-headline)
 
+
+
+(defun org-browser-headline-sync-status (status headline-buffer headline)
+  "Sync browser tab/bookmark status for the headline at point"
+  (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
+				(url (org-browser-headline-url-interactively headline-buffer headline)))
+		(unless url
+			(error "No URL on this headline"))
+		(let ((url (url-normalize-url url)))
+			(org-browser-url-sync-status
+			 url
+			 status
+			 ;; async
+			 (lambda (tabs)
+				 (unless (= 1 (length tabs))
+					 (error "Error closing tab for URL %s found: %s" url tabs))
+				 (let ((tab (elt tabs 0)))
+					 (message "Set status %S for %s" status (org-browser-tab-title tab))
+					 (org-browser-with-headline-by-id
+						headline-buffer
+						headline-id
+						(lambda (headline)
+							(let* ((old-status (org-browser-headline-status headline)))
+								(when (not (eq status old-status))
+									(->> headline
+											 (org-browser-headline-set-status status))))))
+					 ))))))
+
+(defun org-browser-this-headline-sync-status (&optional status)
+  "Sync browser tab/bookmark status for the headline at point"
+  (interactive)
+	(unless status
+		(let ((read-answer-short nil)
+					(action (read-answer (format "Set headline status: ")
+															 '(("tab"  ?t "Open as Tab")
+																 ("bookmark"   ?b "Save as Bookmark")
+																 ("kill"  ?k "Remove from browser")))))
+			(setq status (intern action))))
+  (org-browser-headline-sync-status status (current-buffer) (org-browser-this-headline)))
+(define-key my-tools-command-keymap (kbd "c") #'org-browser-this-headline-sync-status)
+
 (defun org-browser-headline-title-escape (title)
 	(->> title
 			 ;; remove * because of headline level syntax
@@ -306,7 +358,7 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-headline-set-status (status headline)
 	(let ((status-token (xcond
 											 ((eq status 'tab) org-browser-open-tab-name)
-											 ((eq status 'closed) nil))))
+											 ((eq status 'kill) nil))))
 		(cl-flet ((tags-setter (status-token)
 													 (org-ml-insert-into-property :tags 0 status-token headline))
 							(tags-deleter ()
@@ -354,7 +406,7 @@ If a string mark the headline with a property of that name. The property value w
 									 ((string-equal action "edit")
 										(read-string "Edit new title: " new-title))
 									 ((string-equal action "no")
-										nil)
+										old-title)
 									 (t new-title))))))
 			)
 		new-title))
@@ -384,30 +436,6 @@ Should be either 'tab or 'bookmark"
 
 (defun org-browser-headline-url (headline)
   (org-ml-headline-get-node-property org-browser-url-property-name headline))
-
-(defun org-browser-headline-set-status (status headline)
-	(let ((status-token (xcond
-											 ((eq status 'tab) org-browser-open-tab-name)
-											 ((eq status 'closed) nil))))
-		(cl-flet ((tags-setter (status-token)
-													 (org-ml-insert-into-property :tags 0 status-token headline))
-							(tags-deleter ()
-														(->> headline
-																 (org-ml-remove-from-property :tags org-browser-open-tab-name)
-																 (org-ml-remove-from-property :tags org-browser-bookmark-name)))
-							(property-setter (status-token)
-															 (org-ml-headline-set-node-property org-browser-open-tab-type status-token headline))
-							(property-deleter ()
-																(org-ml-headline-set-node-property org-browser-open-tab-type "" headline)))
-			(let ((setter (if (eq org-browser-open-tab-type 'tag)
-												#'tags-setter
-											#'property-setter))
-						(deleter (if (eq org-browser-open-tab-type 'tag)
-												 #'tags-deleter
-											 #'property-deleter)))
-				(if status-token
-						(funcall setter status-token)
-					(funcall deleter))))))
 
 (defun org-browser-headline-status (headline)
 	(if (eq org-browser-open-tab-type 'tag)
@@ -470,7 +498,7 @@ Should be either 'tab or 'bookmark"
 													 (org-browser-headline-update updated-title status url headline)))
 											 ;; update all of the unclosed headlines that were now closed in the browser
 											 (dolist (headline closed-headlines)
-												 (let* ((status 'closed))
+												 (let* ((status 'kill))
 													 (->> headline
 																(org-browser-headline-set-status status)
 																(org-browser-update)))))
