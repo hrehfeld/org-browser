@@ -163,12 +163,12 @@ If a string mark the headline with a property of that name. The property value w
 ;;(org-browser--unpack-u32 (org-browser--pack-u32 42))
 
 
-(defun org-browser-url-is-opened (tab-url handler)
+(defun org-browser-query-status (tab-url handler)
   (org-browser-connection-send
 	 `((type . status)
 		 (url . ,tab-url))
 	 handler))
-;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-url-is-opened "https://github.com/tkf/emacs-request")))
+;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-query-status "https://github.com/tkf/emacs-request")))
 ;;(json-serialize '((:url . "https://github.com/tkf/emacs-request")))
 
 (defun org-browser-url-sync-status (tab-url status title handler)
@@ -257,7 +257,7 @@ If a string mark the headline with a property of that name. The property value w
 			(error "No URL on this headline"))
 		(let ((url (url-normalize-url url)))
 			(message "Syncing %s." url)
-			(org-browser-url-is-opened
+			(org-browser-query-status
 			 url
 			 ;; async
 			 (lambda (tabs)
