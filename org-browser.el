@@ -494,7 +494,10 @@ If a string mark the headline with a property of that name. The property value w
 
 Should be either 'tab or 'bookmark"
 	;;fixme type or status?
-  (intern (gethash "type" tab)))
+	(let ((status (gethash "type" tab)))
+		(if (string-equal status "kill")
+				nil
+			(intern status))))
 
 (defun org-browser-headline-url (headline)
   (org-ml-headline-get-node-property org-browser-url-property-name headline))
