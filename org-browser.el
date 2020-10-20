@@ -262,7 +262,6 @@ If a string mark the headline with a property of that name. The property value w
 						headline-buffer
 						headline-id
 						(lambda (headline)
-							(message "updating headline %s" (org-browser-tab-title tab))
 							(let* ((title (org-browser-tab-title-escaped tab))
 										 (updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
 								(when (not (string-equal title updated-title))
