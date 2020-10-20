@@ -250,6 +250,43 @@ If a string mark the headline with a property of that name. The property value w
 					(org-ml-update* (org-ml-headline-set-node-property org-browser-url-property-name url it) headline))
 				url)))
 
+
+(defun org-browser-sync-headline-handler (kill-headline headline-buffer headline-id tabs)
+	"Handle the result TABS of a sync-headline call for a headline with HEADLINE-ID in HEADLINE-BUFFER.
+
+If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser representation."
+	(case (length tabs)
+		(0
+		 (org-browser-with-headline-by-id
+			headline-buffer
+			headline-id
+			(lambda (headline)
+				(message "Nothing found: %s" (org-browser-headline-url headline))
+				(if kill-headline
+						(org-browser-kill headline)
+					(when (org-browser-headline-status headline)
+						(org-browser-headline-set-status nil headline))))))
+		(t (let ((tab (seq-first tabs)))
+				 (org-browser-with-headline-by-id
+					headline-buffer
+					headline-id
+					(lambda (headline)
+						(message "%s found: %s"
+										 (capitalize (symbol-name (org-browser-tab-status tab)))
+									(org-browser-headline-url headline))
+						(let* ((title (org-browser-tab-title-escaped tab))
+									 (title (org-browser-headline-check-title-interactively title headline-buffer headline))
+									 (status (org-browser-tab-status tab)))
+							(when (org-browser-headline-needs-update title status nil headline)
+								(->> headline
+										 (org-browser-headline-set-title title)
+										 (org-browser-headline-set-status status))))
+						))))
+		;; TODO not sure if this might be an error
+		;;(t (error "More than one browser representation for URL %s found: %S" url tabs))
+		))
+
+
 (defun org-browser-sync-headline (headline-buffer headline)
   "Sync browser tab/bookmark status for the headline at point"
   (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
@@ -262,34 +299,7 @@ If a string mark the headline with a property of that name. The property value w
 			 url
 			 ;; async
 			 (lambda (tabs)
-				 (case (length tabs)
-					 (0
-						(message "Nothing found: %s" url)
-						(org-browser-with-headline-by-id
-						 headline-buffer
-						 headline-id
-						 (lambda (headline)
-							 (when (org-browser-headline-status headline)
-								 (org-browser-headline-set-status nil headline)))))
-					 (1 (let ((tab (seq-first tabs)))
-								(message "%s found: %s" (capitalize (symbol-name (org-browser-tab-status tab))) url)
-								(org-browser-with-headline-by-id
-								 headline-buffer
-								 headline-id
-								 (lambda (headline)
-									 (let* ((title (org-browser-tab-title-escaped tab))
-													(updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
-										 (when (not (string-equal title updated-title))
-											 (->>
-												(org-browser-headline-set-title updated-title)
-												(org-browser-headline-set-url (org-browser-tab-url tab)))))
-									 ;; (org-ml-update (lambda (hl)
-									 ;; 								 (message "headline: %S" (org-ml-get-property :begin hl))
-									 ;; 								 hl)
-									 ;; 							 )
-									 ))
-								))
-					 (t (error "More than one browser representation for URL %s found: %S" url tabs))))))))
+				 (org-browser-sync-headline-handler nil headline-buffer headline-id tabs))))))
 
 (defun org-browser-this-headline ()
   "Get the headline at point, creating ID"
@@ -313,34 +323,36 @@ If a string mark the headline with a property of that name. The property value w
 				(url (org-browser-headline-url-interactively headline-buffer headline)))
 		(unless url
 			(error "No URL on this headline"))
-		(let ((url (url-normalize-url url)))
+		(let ((url (url-normalize-url url))
+					(kill-headline (eq status 'kill-trash)))
 			(org-browser-query-set-status
 			 url
 			 ;; kill-trash is just kill for the browser
-			 (if (eq status 'kill-trash) 'kill status)
+			 (if kill-headline 'kill status)
 			 title
 			 ;; async
 			 (lambda (tabs)
-				 (unless (= 1 (length tabs))
-					 (error "Error closing tab for URL %s found: %s" url tabs))
-				 (let ((tab (elt tabs 0)))
-					 (message "Set status %S for %s" status (org-browser-tab-title tab))
-					 (org-browser-with-headline-by-id
-						headline-buffer
-						headline-id
-						(lambda (headline)
-							(if (eq status 'kill-trash)
-									(progn
-										(org-browser-kill headline)
-										;; important: return nil so the wrapping org-browser-with-headline-by-id doesn't
-										;; try to update the headline when this returns
-										nil)
-								;; anything but kill-trash potentially modifies the headline
-								(let* ((status (case status (kill nil) (kill-trash nil) (t status)))
-											 (old-status (org-browser-headline-status headline)))
-									(when (not (eq status old-status))
-										(org-browser-headline-set-status status headline))))))
-					 ))))))
+				 (org-browser-sync-headline-handler kill-headline headline-buffer headline-id tabs)
+				 ;; (when (= 1 (length tabs))
+				 ;; 	 (let ((tab (seq-first tabs)))
+				 ;; 		 (message "Set status %S for %s" status (org-browser-tab-title tab))
+				 ;; 		 (org-browser-with-headline-by-id
+				 ;; 			headline-buffer
+				 ;; 			headline-id
+				 ;; 			(lambda (headline)
+				 ;; 				(if (eq status 'kill-trash)
+				 ;; 						(progn
+				 ;; 							(org-browser-kill headline)
+				 ;; 							;; important: return nil so the wrapping org-browser-with-headline-by-id doesn't
+				 ;; 							;; try to update the headline when this returns
+				 ;; 							nil)
+				 ;; 					;; anything but kill-trash potentially modifies the headline
+				 ;; 					(let* ((status (case status (kill nil) (kill-trash nil) (t status)))
+				 ;; 								 (old-status (org-browser-headline-status headline)))
+				 ;; 						(when (not (eq status old-status))
+				 ;; 							(org-browser-headline-set-status status headline))))))
+				 ;; 		 ))
+				 )))))
 
 (defun org-browser-this-headline-sync-status (&optional status)
   "Sync browser tab/bookmark status for the headline at point"
@@ -404,12 +416,15 @@ If a string mark the headline with a property of that name. The property value w
 			 ))
 
 (defun org-browser-headline-needs-update (title status url headline)
-	;; go through all properties and see if they need updating
-	(or
-	 (not (string-equal title (org-util-headline-get-title headline)))
-	 (not (eq status (org-browser-headline-status headline)))
-	 (not (string-equal url (org-browser-headline-url headline)))
-	 ))
+	(let ((title (or title (org-util-headline-get-title headline)))
+				;; status has a legal value of nil
+				(url (or url (org-browser-headline-url headline))))
+		;; go through all properties and see if they need updating
+		(or
+		 (not (string-equal title (org-util-headline-get-title headline)))
+		 (not (eq status (org-browser-headline-status headline)))
+		 (not (string-equal url (org-browser-headline-url headline)))
+		 )))
 
 (defun org-browser-headline-update (title status url headline)
 	(when (org-browser-headline-needs-update title status url headline)
