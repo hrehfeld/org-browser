@@ -252,7 +252,7 @@ If a string mark the headline with a property of that name. The property value w
 (defun org-browser-sync-headline (headline-buffer headline)
   "Sync browser tab/bookmark status for the headline at point"
   (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
-				(url (org-browser-headline-url-interactively)))
+				(url (org-browser-headline-url-interactively headline-buffer headline)))
 		(unless url
 			(error "No URL on this headline"))
 		(let ((url (url-normalize-url url)))
