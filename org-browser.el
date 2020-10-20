@@ -559,7 +559,8 @@ Should be either 'tab or 'bookmark"
 																					 (put-tab tab found-tabs)
 																					 (let* (
 																									(title (org-browser-tab-title-escaped tab))
-																									(url (org-browser-tab-url tab))
+																									;;(url (org-browser-tab-url tab))
+																									(url (org-browser-headline-url tab))
 																									(status (org-browser-tab-status tab))
 																									(title (org-browser-headline-check-title-interactively title curbuf headline)))
 																						 ;;(message "Found tab for %S" url)
