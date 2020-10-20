@@ -257,31 +257,39 @@ If a string mark the headline with a property of that name. The property value w
 		(unless url
 			(error "No URL on this headline"))
 		(let ((url (url-normalize-url url)))
-			(message "Syncing %s." url)
+			(message "Checking status of %s." url)
 			(org-browser-query-status
 			 url
 			 ;; async
 			 (lambda (tabs)
-				 (unless (= 1 (length tabs))
-					 (error "No tab for URL %s found: %s" url tabs))
-				 (let ((tab (elt tabs 0)))
-					 (message "Tab found: %s %S" url tab)
-					 (org-browser-with-headline-by-id
-						headline-buffer
-						headline-id
-						(lambda (headline)
-							(let* ((title (org-browser-tab-title-escaped tab))
-										 (updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
-								(when (not (string-equal title updated-title))
-									(->>
-									 (org-browser-headline-set-title updated-title)
-									 (org-browser-headline-set-url (org-browser-tab-url tab)))))
-							;; (org-ml-update (lambda (hl)
-							;; 								 (message "headline: %S" (org-ml-get-property :begin hl))
-							;; 								 hl)
-							;; 							 )
-							))
-					 ))))))
+				 (case (length tabs)
+					 (0
+						(message "Nothing found: %s" url)
+						(org-browser-with-headline-by-id
+						 headline-buffer
+						 headline-id
+						 (lambda (headline)
+							 (when (org-browser-headline-status headline)
+								 (org-browser-headline-set-status nil headline)))))
+					 (1 (let ((tab (seq-first tabs)))
+								(message "%s found: %s" (capitalize (symbol-name (org-browser-tab-status tab))) url)
+								(org-browser-with-headline-by-id
+								 headline-buffer
+								 headline-id
+								 (lambda (headline)
+									 (let* ((title (org-browser-tab-title-escaped tab))
+													(updated-title (org-browser-headline-check-title-interactively title headline-buffer headline)))
+										 (when (not (string-equal title updated-title))
+											 (->>
+												(org-browser-headline-set-title updated-title)
+												(org-browser-headline-set-url (org-browser-tab-url tab)))))
+									 ;; (org-ml-update (lambda (hl)
+									 ;; 								 (message "headline: %S" (org-ml-get-property :begin hl))
+									 ;; 								 hl)
+									 ;; 							 )
+									 ))
+								))
+					 (t (error "More than one browser representation for URL %s found: %S" url tabs))))))))
 
 (defun org-browser-this-headline ()
   "Get the headline at point, creating ID"
