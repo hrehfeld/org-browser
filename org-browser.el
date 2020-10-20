@@ -186,6 +186,14 @@ If a string mark the headline with a property of that name. The property value w
    `((type . all))
    callback))
 
+
+(defun org-browser-query-activate (url callback)
+  (org-browser-connection-send
+   `((type . activate)
+		 (url . ,url))
+   callback))
+
+
 ;;(defun org-browser-headline-select-url (headline))
 
 (defun org-browser-filter-headline-with-uuid (uuid headlinesa)
@@ -342,6 +350,30 @@ If a string mark the headline with a property of that name. The property value w
 																			(current-buffer)
 																			headline)))
 (define-key my-tools-command-keymap (kbd "c") #'org-browser-this-headline-sync-status)
+
+
+(defun org-browser-headline-activate (headline-buffer headline)
+  "Focus HEADLINE from HEADLINE-BUFFER in browser."
+  (let ((headline-id (org-ml-headline-get-node-property "ID" headline))
+				(title (org-util-headline-get-title headline))
+				(url (org-browser-headline-url-interactively headline-buffer headline)))
+		(unless url
+			(error "No URL on this headline"))
+		(let ((url (url-normalize-url url)))
+			(org-browser-query-activate
+			 url
+			 ;; async
+			 (lambda (tabs)
+				 (unless (= 1 (length tabs))
+					 (error "Error activating tab for URL %s found: %s" url tabs))
+				 )))))
+
+(defun org-browser-this-headline-activate ()
+  "Sync browser tab/bookmark status for the headline at point"
+  (interactive)
+	(let ((headline (org-browser-this-headline)))
+		(org-browser-headline-activate (current-buffer) headline)))
+(define-key my-tools-command-keymap (kbd "a") #'org-browser-this-headline-activate)
 
 (defun org-browser-headline-title-escape (title)
 	(->> title
