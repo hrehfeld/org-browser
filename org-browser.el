@@ -171,7 +171,8 @@ If a string mark the headline with a property of that name. The property value w
 ;;(global-set-key (kbd "<f10>") (lambda () (interactive) (org-browser-query-status "https://github.com/tkf/emacs-request")))
 ;;(json-serialize '((:url . "https://github.com/tkf/emacs-request")))
 
-(defun org-browser-url-sync-status (tab-url status title handler)
+
+(defun org-browser-query-set-status (tab-url status title handler)
   (org-browser-connection-send
 	 `((type . set)
 		 (status . ,status)
@@ -179,19 +180,11 @@ If a string mark the headline with a property of that name. The property value w
 		 (url . ,tab-url))
 	 handler))
 
-(defun org-browser-url-open (tab-url handler)
+
+(defun org-browser-query-all  (callback)
   (org-browser-connection-send
-	 `((type . open)
-		 (url . ,tab-url))
-	 (lambda (item-list)
-		 (if (not (seq-empty-p item-list))
-				 (let* ((item (elt item-list 0))
-								(type (assq 'type item)))
-					 (message "Received response: %S" item)
-					 (funcall handler item)
-					 )
-			 (error "Something went wrong when opening tab %s." tab-url)
-			 ))))
+   `((type . all))
+   callback))
 
 ;;(defun org-browser-headline-select-url (headline))
 
@@ -306,7 +299,7 @@ If a string mark the headline with a property of that name. The property value w
 		(unless url
 			(error "No URL on this headline"))
 		(let ((url (url-normalize-url url)))
-			(org-browser-url-sync-status
+			(org-browser-query-set-status
 			 url
 			 ;; kill-trash is just kill for the browser
 			 (if (eq status 'kill-trash) 'kill status)
@@ -447,11 +440,6 @@ If a string mark the headline with a property of that name. The property value w
 
 
 
-(defun org-browser-get-items  (callback)
-  (org-browser-connection-send
-   `((type . all))
-   callback))
-
 (defun org-browser-tab-url (tab)
   (gethash "url" tab))
 
@@ -486,7 +474,7 @@ Should be either 'tab or 'bookmark"
 
 (defun org-browser-sync ()
   (interactive)
-  (org-browser-get-items
+  (org-browser-query-all
    (lambda (item-list)
 		 ;;(message "%s tabs received" (length item-list))
 		 ;;(message "%S" item-list)
