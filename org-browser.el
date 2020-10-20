@@ -328,7 +328,8 @@ If a string mark the headline with a property of that name. The property value w
 										;; try to update the headline when this returns
 										nil)
 								;; anything but kill-trash potentially modifies the headline
-								(let* ((old-status (org-browser-headline-status headline)))
+								(let* ((status (case status (kill nil) (kill-trash nil) (t status)))
+											 (old-status (org-browser-headline-status headline)))
 									(when (not (eq status old-status))
 										(org-browser-headline-set-status status headline))))))
 					 ))))))
