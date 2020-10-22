@@ -7,6 +7,9 @@
 
 (require 'org-util)
 
+
+;;TODO: do everything we do on headlines on subtrees instead?
+
 (defvar org-browser-inbox-file (concat org-directory "browser.org") "Org-mode file to put new browser tabs into.")
 (defvar org-browser-sync-files nil "Org-mode files to sync browser tabs into.
 
