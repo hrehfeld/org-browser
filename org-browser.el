@@ -17,6 +17,7 @@
 ;;(setq org-browser-sync-files org-agenda-files)
 ;;(setq org-browser-sync-files (list org-browser-inbox-file))
 
+(defvar org-browser-title-property-name "TITLE" "Name of the property that is used to associate TITLEs to headlines if browser titles are different from the org headline.")
 (defvar org-browser-url-property-name "URL" "Name of the property that is used to associate URLs to headlines.")
 (defvar org-browser-bookmark-name "bookmark" "Marker to identify headlines that have a bookmark in the browser.
 
@@ -276,15 +277,14 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 					(lambda (headline)
 						(message "%s found: %s"
 										 (capitalize (symbol-name (org-browser-tab-status tab)))
-									(org-browser-headline-url headline))
-						(let* ((title (org-browser-tab-title-escaped tab))
-									 (title (org-browser-headline-check-title-interactively title headline-buffer headline))
-									 (status (org-browser-tab-status tab)))
-							(when (org-browser-headline-needs-update title status nil headline)
-								(->> headline
-										 (org-browser-headline-set-title title)
-										 (org-browser-headline-set-status status))))
-						))))
+										 (org-browser-headline-url headline))
+						(if kill-headline
+								(org-browser-kill headline)
+							(let* ((status (org-browser-tab-status tab))
+										 (title (org-browser-tab-title-escaped tab))
+										 )
+								(org-browser-headline-set-interactively headline-buffer title status nil headline))
+						)))))
 		;; TODO not sure if this might be an error
 		;;(t (error "More than one browser representation for URL %s found: %S" url tabs))
 		))
@@ -418,22 +418,18 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 			 (org-browser-headline-set-url url)
 			 ))
 
-(defun org-browser-headline-needs-update (title status url headline)
+(defun org-browser-headline-needs-update (title title-prop status url  headline)
 	(let ((title (or title (org-util-headline-get-title headline)))
+				;; title-prop has a legal value of nil
 				;; status has a legal value of nil
 				(url (or url (org-browser-headline-url headline))))
 		;; go through all properties and see if they need updating
 		(or
 		 (not (string-equal title (org-util-headline-get-title headline)))
+		 (not (string-equal title-prop (org-browser-headline-title-prop headline)))
 		 (not (eq status (org-browser-headline-status headline)))
 		 (not (string-equal url (org-browser-headline-url headline)))
 		 )))
-
-(defun org-browser-headline-update (title status url headline)
-	(when (org-browser-headline-needs-update title status url headline)
-		(org-browser-headline-set title status url headline)
-		(org-browser-update headline)))
-
 
 
 (defun org-browser-headline-set-status (status headline)
@@ -467,35 +463,55 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 (defun org-browser-headline-set-title (title headline)
 	(org-ml-headline-set-title! (org-browser-headline-title-escape title) nil headline))
 
+(defun org-browser-headline-set-title-prop (title-prop headline)
+	(org-ml-headline-set-node-property org-browser-title-property-name title-prop headline))
+
 (defun org-browser-headline-set-url (url headline)
 	(org-ml-headline-set-node-property org-browser-url-property-name url headline))
 
 (defun org-browser-headline-check-title-interactively (new-title buffer headline)
-	"Update "
-  (let* ((old-title (org-util-headline-get-title headline)))
-		(when (and (not (string-empty-p old-title))
-							 (not (string-equal new-title old-title)))
+	"Return "
+  (let ((old-title (org-util-headline-get-title headline))
+				(title-prop (org-browser-headline-title-prop headline)))
+		(if (or (string-empty-p old-title)
+						(string-equal new-title old-title)
+						title-prop
+						)
+			(cons title-prop new-title)
 			(with-current-buffer buffer
 				(save-excursion
 					(let ((headline-pos (org-ml-get-property :begin headline)))
 						(assert headline-pos)
 						;; position to have a look at the headline for the prompt
 						(goto-char headline-pos))
-					(setq new-title
-								(let ((read-answer-short t)
-											(action (read-answer (format "Overwrite Headline Title? \"%s\" -> \"%s\": " old-title new-title)
-																					 '(("yes"  ?y "overwrite with tab title")
-																						 ("no"   ?n "keep org title")
-																						 ("edit"  ?e "edit tab title and overwrite")))))
-									(xcond
-									 ((string-equal action "edit")
-										(read-string "Edit new title: " new-title))
-									 ((string-equal action "no")
-										old-title)
-									 (t new-title))))))
-			)
-		new-title))
+					(let* (;;(read-answer-short t)
+								 (action (intern
+													(read-answer (format "Overwrite Headline Title? \"%s\" => \"%s\": " old-title new-title)
+																			 '(("overwrite"  ?o "overwrite with tab title")
+																				 ("keep"   ?k "keep org title")
+																				 ("edit"  ?e "edit tab title and overwrite"))))))
 
+						(case action
+							('edit
+							 (let ((title (read-string "Edit new title: " new-title)))
+								 (cons (unless (string-equal old-title title) new-title) title)))
+							('keep
+							 (cons new-title old-title))
+							('overwrite
+							 (cons nil new-title))
+							(t (assert nil)))))))))
+
+
+(defun org-browser-headline-set-interactively (headline-buffer title status url headline)
+	"Set TITLE, STATUS and URL of HEADLINE, possibly querying the user in the process. Return modified headline or nil if nothing changed."
+	(let* ((url (or url (org-browser-headline-url headline)))
+				 (title (org-browser-headline-check-title-interactively title headline-buffer headline))
+				 (title-prop (car title))
+				 (title (cdr title)))
+		;; return headline only if changed
+		(when (org-browser-headline-needs-update title title-prop status url headline)
+			(->> (org-browser-headline-set-title-prop title-prop headline)
+					 (org-browser-headline-set title status url)))))
 
 
 (defun org-browser-tab-url (tab)
@@ -516,6 +532,9 @@ Should be either 'tab or 'bookmark"
 		(if (string-equal status "kill")
 				nil
 			(intern status))))
+
+(defun org-browser-headline-title-prop (headline)
+  (org-ml-headline-get-node-property org-browser-title-property-name headline))
 
 (defun org-browser-headline-url (headline)
   (org-ml-headline-get-node-property org-browser-url-property-name headline))
@@ -611,12 +630,11 @@ Should be either 'tab or 'bookmark"
 																									;;(url (org-browser-tab-url tab))
 																									(url (org-browser-headline-url headline))
 																									(status (org-browser-tab-status tab))
-																									(title (org-browser-headline-check-title-interactively title curbuf headline)))
+																									)
 																						 ;;(message "Found tab for %S" url)
 																						 ;;(message "Found headline for %s in %s" headline-url file-name)
 																						 ;; return headline only if changed
-																						 (when (org-browser-headline-needs-update title status url headline)
-																							 (org-browser-headline-set title status url headline)))
+																						 (org-browser-headline-set-interactively curbuf title status nil headline))
 																					 )))))
 													 ;; update if present
 													 (when updated-headline
@@ -652,5 +670,10 @@ Should be either 'tab or 'bookmark"
 	())
 (add-hook 'org-after-tags-change-hook #'org-browser-tag-hook-fun)
 
+(defun org-browser-cut-subtree ()
+	"Cut the subtree point is on and remove from browser."
+	(interactive)
+	(org-browser-this-headline-sync-status 'kill-trash))
 
+(substitute-key-definition #'org-cut-subtree #'org-browser-cut-subtree org-mode-map)
 (provide 'org-browser)
