@@ -11,11 +11,10 @@
 ;;TODO: do everything we do on headlines on subtrees instead?
 
 (defvar org-browser-inbox-file (concat org-directory "browser.org") "Org-mode file to put new browser tabs into.")
+(defvar org-browser-kill-closed-inbox-headlines nil "Kill headlines from `org-browser-inbox-file' that were closed in the browser.")
 (defvar org-browser-sync-files nil "Org-mode files to sync browser tabs into.
 
 `org-agenda-files` might be a good choice.")
-;;(setq org-browser-sync-files org-agenda-files)
-;;(setq org-browser-sync-files (list org-browser-inbox-file))
 
 (defvar org-browser-title-property-name "TITLE" "Name of the property that is used to associate TITLEs to headlines if browser titles are different from the org headline.")
 (defvar org-browser-url-property-name "URL" "Name of the property that is used to associate URLs to headlines.")
@@ -29,8 +28,8 @@ May be used as a tag or property, so be careful to use appropriate characters on
 ;; (setq org-browser-open-tab-name "opentab")
 (defvar org-browser-open-tab-type 'tag "Where to put the marker that identifies headlines that have an open tab in the browser.
 
-If the symbol 'tag mark the headline with a tag. The Tag name will be `org-browser-open-tab-name`.
-If a string mark the headline with a property of that name. The property value will be `org-browser-open-tab-name`.
+If the symbol `tag`, mark the headline with a tag. The Tag name will be `org-browser-open-tab-name`.
+If any string, mark the headline with a property of that name. The property value will be `org-browser-open-tab-name`.
 ")
 ;; (setq org-browser-open-tab-type 'tag)
 ;; (setq org-browser-open-tab-type "BROWSER")
@@ -136,7 +135,7 @@ If a string mark the headline with a property of that name. The property value w
 	;;(delete-process org-browser--connection)
 	(setq org-browser--connection nil)
 	))
-(global-set-key (kbd "<f7>") (lambda () (interactive) (org-browser-connection-delete)))
+;;(global-set-key (kbd "<f7>") (lambda () (interactive) (org-browser-connection-delete)))
 
 (defun org-browser-connection-send-raw (msg)
   "Send a json encoded MSG after making sure connection is up."
@@ -200,18 +199,24 @@ If a string mark the headline with a property of that name. The property value w
 
 ;;(defun org-browser-headline-select-url (headline))
 
-(defun org-browser-filter-headline-with-uuid (uuid headlinesa)
+(defun org-browser-check-org-mode-active ()
+	(unless (eq major-mode 'org-mode)
+		(error "Please use from an org-mode buffer.")))
+
+(defun org-browser-filter-headline-with-uuid (uuid nodes)
   (cl-flet ((has-this-id (headline)
 												 (equal uuid
 																(org-ml-headline-get-node-property "ID" headline))))
 		(save-excursion
-			(let* ((headlines (org-ml-match '(headline) headlinesa))
+			(let* ((headlines (org-ml-match '(headline) nodes))
 						 (matching-headlines (-filter #'has-this-id headlines)))
-				(assert matching-headlines t "No headline with this uuid!" uuid headlines headlinesa)
+				(assert matching-headlines t "No headline with this uuid! %s" uuid headlines nodes)
 				(if (cdr matching-headlines)
 						(error (format "Multiple matching headlines found for UUID %S" uuid))
 					(car matching-headlines))))))
 
+(defun org-browser-parse-headlines-this-buffer ()
+	(org-ml-get-headlines))
 
 (defun org-browser-update (old new)
 	(save-excursion
@@ -230,12 +235,12 @@ If a string mark the headline with a property of that name. The property value w
 					(end (org-ml-get-property :end headline)))
 			(assert begin)
 			(assert end)
-			(delete-region begin end))))
+			(kill-region begin end))))
 
 (defun org-browser-with-headline-by-id (headline-buffer headline-id f)
 	(with-current-buffer headline-buffer
 		(save-excursion
-			(let* ((old-headline (->> (org-ml-parse-this-buffer)
+			(let* ((old-headline (->> (org-browser-parse-headlines-this-buffer)
 																(org-browser-filter-headline-with-uuid headline-id))))
 				(let ((headline (funcall f old-headline)))
 					(when headline
@@ -282,8 +287,8 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 								(org-browser-kill headline)
 							(let* ((status (org-browser-tab-status tab))
 										 (title (org-browser-tab-title-escaped tab))
-										 )
-								(org-browser-headline-set-interactively headline-buffer title status nil headline))
+										 (url (org-browser-tab-url tab)))
+								(org-browser-headline-set-interactively headline-buffer title status url headline))
 						)))))
 		;; TODO not sure if this might be an error
 		;;(t (error "More than one browser representation for URL %s found: %S" url tabs))
@@ -306,7 +311,6 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 
 (defun org-browser-this-headline ()
   "Get the headline at point, creating ID"
-  (interactive)
   (let* ((headline-id (org-id-get-create))
 				 (headline (org-ml-parse-this-headline)))
 		headline))
@@ -314,8 +318,8 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 (defun org-browser-sync-this-headline ()
   "Sync browser tab/bookmark status for the headline at point"
   (interactive)
+	(org-browser-check-org-mode-active)
   (org-browser-sync-headline (current-buffer) (org-browser-this-headline)))
-(global-set-key (kbd "<f9>") #'org-browser-sync-this-headline)
 
 
 
@@ -360,6 +364,8 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 (defun org-browser-this-headline-sync-status (&optional status)
   "Sync browser tab/bookmark status for the headline at point"
   (interactive)
+	(org-browser-check-org-mode-active)
+
 	(unless status
 		(let ((read-answer-short nil)
 					(action (read-answer (format "Set headline status: ")
@@ -373,7 +379,6 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 		(org-browser-headline-sync-status status
 																			(current-buffer)
 																			headline)))
-(define-key my-tools-command-keymap (kbd "c") #'org-browser-this-headline-sync-status)
 
 
 (defun org-browser-headline-activate (headline-buffer headline)
@@ -395,9 +400,9 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 (defun org-browser-this-headline-activate ()
   "Sync browser tab/bookmark status for the headline at point"
   (interactive)
+	(org-browser-check-org-mode-active)
 	(let ((headline (org-browser-this-headline)))
 		(org-browser-headline-activate (current-buffer) headline)))
-(define-key my-tools-command-keymap (kbd "a") #'org-browser-this-headline-activate)
 
 (defun org-browser-headline-title-escape (title)
 	(->> title
@@ -407,6 +412,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 			 (replace-regexp-in-string "[:blank:]*\\(:[^:[:blank:]]+\\)+:[:blank:]*$" "")
 			 ;; remove leading numbers 1. because of numbered lists
 			 (replace-regexp-in-string "^[0-9]+\\.[ 	]+" "")
+			 (replace-regexp-in-string "^[-#|]+[ 	]+" "")
 			 ))
 
 ;;(org-browser-headline-title-escape "** 3. Python: foo :foo:bar:")
@@ -433,10 +439,11 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 
 
 (defun org-browser-headline-set-status (status headline)
-	(let ((status-token (xcond
+	(let ((status-token (cond
 											 ((eq status 'tab) org-browser-open-tab-name)
 											 ((eq status 'bookmark) org-browser-bookmark-name)
-											 ((eq status nil) nil))))
+											 ((eq status nil) nil)
+											 (t (assert nil)))))
 		(cl-flet* ((tags-deleter ()
 														 (->> headline
 																	(org-ml-remove-from-property :tags org-browser-open-tab-name)
@@ -472,6 +479,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 (defun org-browser-headline-check-title-interactively (new-title buffer headline)
 	"Return "
   (let ((old-title (org-util-headline-get-title headline))
+				(new-title (org-browser-headline-title-escape new-title))
 				(title-prop (org-browser-headline-title-prop headline)))
 		(if (or (string-empty-p old-title)
 						(string-equal new-title old-title)
@@ -533,6 +541,9 @@ Should be either 'tab or 'bookmark"
 				nil
 			(intern status))))
 
+(defun org-browser-headline-title (headline)
+  (org-util-headline-get-title headline))
+
 (defun org-browser-headline-title-prop (headline)
   (org-ml-headline-get-node-property org-browser-title-property-name headline))
 
@@ -548,6 +559,14 @@ Should be either 'tab or 'bookmark"
 				;;nil for not opened/saved/represented in browser
 				)
 		(org-ml-headline-get-node-property org-browser-open-tab-type headline)))
+
+(defun org-browser-status-at-point ()
+  (let ((status (org-browser-headline-status (org-ml-parse-headline-at (point)))))
+    (if status
+        (progn
+          (cl-check-type status symbol)
+          status)
+      "")))
 
 (defun org-browser-node-without-parent (node)
 	(org-plist-delete (cdr node) :parent))
@@ -569,9 +588,10 @@ Should be either 'tab or 'bookmark"
 				 (save-window-excursion
 					 (let ((sync-files (append org-browser-sync-files (list org-browser-inbox-file))))
 						 (dolist (file-name sync-files)
-							 (let ((curbuf (find-file-noselect file-name)))
+							 (let ((curbuf (find-file-noselect file-name))
+										 (in-inbox-file (file-equal-p file-name org-browser-inbox-file)))
 								 (with-current-buffer curbuf
-									 (let* ((headlines (->> (org-ml-parse-this-buffer)
+									 (let* ((headlines (->> (org-browser-parse-headlines-this-buffer)
 																					(org-ml-match '(headline))))
 
 													(headlines (let (;; retain headlines that have an open browser tab
@@ -619,8 +639,12 @@ Should be either 'tab or 'bookmark"
 																(if (eq op 'kill)
 																		;; closed headline (headline only in org)
 																		;; update all of the unclosed headlines that were now closed in the browser
-																		(when (org-browser-headline-status headline)
-																			(org-browser-headline-set-status nil headline))
+																		(if (and in-inbox-file org-browser-kill-closed-inbox-headlines)
+																				(progn
+																					(message "Killing inbox headline %s" (org-browser-headline-title headline))
+																					(org-browser-kill headline))
+																			(when (org-browser-headline-status headline)
+																				(org-browser-headline-set-status nil headline)))
 																	;; headline with browser representation -- update headline
 																	(progn (assert (eq op 'update))
 																				 (let ((tab (get-tab (org-browser-headline-url headline) tabs-map)))
@@ -663,17 +687,19 @@ Should be either 'tab or 'bookmark"
 															))
 													tabs-map)))))))
 		 )))
-(global-set-key (kbd "<f8>") #'org-browser-sync)
 ;;(setq print-length 999)
 
 (defun org-browser-tag-hook-fun ()
 	())
 (add-hook 'org-after-tags-change-hook #'org-browser-tag-hook-fun)
 
-(defun org-browser-cut-subtree ()
-	"Cut the subtree point is on and remove from browser."
-	(interactive)
-	(org-browser-this-headline-sync-status 'kill-trash))
+(defun org-browser-cut-subtree (&optional n)
+	"Cut the subtree point is on and remove from browser. Fall back to org-cut-subtree if not on a url headline"
+	(interactive "p")
+	(org-browser-check-org-mode-active)
+	(if (org-browser-headline-url (org-ml-parse-this-headline))
+			(org-browser-this-headline-sync-status 'kill-trash)
+    ;; don't use org-cut-subtree directly so it can be adviced
+		(org-copy-subtree n 'cut)))
 
-(substitute-key-definition #'org-cut-subtree #'org-browser-cut-subtree org-mode-map)
 (provide 'org-browser)

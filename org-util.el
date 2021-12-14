@@ -19,7 +19,7 @@ Otherwise PROMPT the user for a choice."
 
 (defun org-util-headline-get-links (headline)
   "Find all links in HEADLINE and return as list."
-  (let* ((section (org-ml-headline-get-contents t t headline))
+  (let* ((section (org-ml-headline-get-contents nil headline))
 		(title (org-ml-get-property :title headline))
 		(link-lists (--map (org-ml-match '(link) it) (cons (org-ml-get-children title) section)))
 		(links (apply #'append link-lists)))
