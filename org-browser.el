@@ -86,7 +86,7 @@ If any string, mark the headline with a property of that name. The property valu
 					;;(message "Received response: %s %S" message-id payload)
 					;;(message "%S: %S" message-id msg)
 					;;(message "%S" org-browser--response-handlers)
-					(assert handler)
+					(cl-assert handler)
 					(setq org-browser--response-handlers (assoc-delete-all message-id org-browser--response-handlers))
 					(funcall handler payload))
 			  ))))))
@@ -210,7 +210,7 @@ If any string, mark the headline with a property of that name. The property valu
 		(save-excursion
 			(let* ((headlines (org-ml-match '(headline) nodes))
 						 (matching-headlines (-filter #'has-this-id headlines)))
-				(assert matching-headlines t "No headline with this uuid! %s" uuid headlines nodes)
+				(cl-assert matching-headlines t "No headline with this uuid! %s" uuid headlines nodes)
 				(if (cdr matching-headlines)
 						(error (format "Multiple matching headlines found for UUID %S" uuid))
 					(car matching-headlines))))))
@@ -223,8 +223,8 @@ If any string, mark the headline with a property of that name. The property valu
 		(let ((begin (org-ml-get-property :begin old))
 					(end (org-ml-get-property :end old)))
 			(message "Updating from (%s %s) %s" begin end (org-ml-get-property :raw-value new))
-			(assert begin)
-			(assert end)
+			(cl-assert begin)
+			(cl-assert end)
 			(delete-region begin end)
 			(goto-char begin)
 			(insert (org-element-interpret-data new)))))
@@ -233,8 +233,8 @@ If any string, mark the headline with a property of that name. The property valu
 	(save-excursion
 		(let ((begin (org-ml-get-property :begin headline))
 					(end (org-ml-get-property :end headline)))
-			(assert begin)
-			(assert end)
+			(cl-assert begin)
+			(cl-assert end)
 			(kill-region begin end))))
 
 (defun org-browser-with-headline-by-id (headline-buffer headline-id f)
@@ -264,7 +264,7 @@ If any string, mark the headline with a property of that name. The property valu
 	"Handle the result TABS of a sync-headline call for a headline with HEADLINE-ID in HEADLINE-BUFFER.
 
 If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser representation."
-	(case (length tabs)
+	(cl-case (length tabs)
 		(0
 		 (org-browser-with-headline-by-id
 			headline-buffer
@@ -354,7 +354,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 				 ;; 							;; try to update the headline when this returns
 				 ;; 							nil)
 				 ;; 					;; anything but kill-trash potentially modifies the headline
-				 ;; 					(let* ((status (case status (kill nil) (kill-trash nil) (t status)))
+				 ;; 					(let* ((status (cl-case status (kill nil) (kill-trash nil) (t status)))
 				 ;; 								 (old-status (org-browser-headline-status headline)))
 				 ;; 						(when (not (eq status old-status))
 				 ;; 							(org-browser-headline-set-status status headline))))))
@@ -443,7 +443,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 											 ((eq status 'tab) org-browser-open-tab-name)
 											 ((eq status 'bookmark) org-browser-bookmark-name)
 											 ((eq status nil) nil)
-											 (t (assert nil)))))
+											 (t (cl-assert nil)))))
 		(cl-flet* ((tags-deleter ()
 														 (->> headline
 																	(org-ml-remove-from-property :tags org-browser-open-tab-name)
@@ -489,7 +489,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 			(with-current-buffer buffer
 				(save-excursion
 					(let ((headline-pos (org-ml-get-property :begin headline)))
-						(assert headline-pos)
+						(cl-assert headline-pos)
 						;; position to have a look at the headline for the prompt
 						(goto-char headline-pos))
 					(let* (;;(read-answer-short t)
@@ -499,7 +499,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 																				 ("keep"   ?k "keep org title")
 																				 ("edit"  ?e "edit tab title and overwrite"))))))
 
-						(case action
+						(cl-case action
 							('edit
 							 (let ((title (read-string "Edit new title: " new-title)))
 								 (cons (unless (string-equal old-title title) new-title) title)))
@@ -507,7 +507,7 @@ If KILL-HEADLINE is non-nil, kill the headline if it has no in-browser represent
 							 (cons new-title old-title))
 							('overwrite
 							 (cons nil new-title))
-							(t (assert nil)))))))))
+							(t (cl-assert nil)))))))))
 
 
 (defun org-browser-headline-set-interactively (headline-buffer title status url headline)
@@ -646,7 +646,7 @@ Should be either 'tab or 'bookmark"
 																			(when (org-browser-headline-status headline)
 																				(org-browser-headline-set-status nil headline)))
 																	;; headline with browser representation -- update headline
-																	(progn (assert (eq op 'update))
+																	(progn (cl-assert (eq op 'update))
 																				 (let ((tab (get-tab (org-browser-headline-url headline) tabs-map)))
 																					 (put-tab tab found-tabs)
 																					 (let* (
